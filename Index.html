@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Filmography Search</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --surface: #f8f9fa;
+      --border: #dadce0;
+      --text-primary: #202124;
+      --text-secondary: #70757a;
+      --pill-active-bg: #e8f0fe;
+      --pill-active-text: #1967d2;
+      --pill-active-border: #d2e3fc;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+    body { background: var(--bg); color: var(--text-primary); padding: 24px; max-width: 1100px; margin: 0 auto; }
+
+    /* Search Header */
+    .search-bar { display: flex; gap: 10px; margin-bottom: 24px; flex-wrap: wrap; }
+    input {
+      padding: 10px 16px; border: 1px solid var(--border); border-radius: 24px;
+      font-size: 16px; outline: none; transition: box-shadow 0.2s;
+    }
+    input:focus { box-shadow: 0 1px 6px rgba(32,33,36,0.28); border-color: transparent; }
+    #searchInput { flex: 1; min-width: 240px; }
+    #apiKeyInput { width: 220px; font-size: 13px; }
+    button.search-btn {
+      padding: 10px 20px; background: #1a73e8; color: white; border: none;
+      border-radius: 24px; font-size: 14px; font-weight: 500; cursor: pointer;
+    }
+    button.search-btn:hover { background: #1557b0; }
+
+    /* Person Header */
+    .person-header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+    .person-avatar { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; background: var(--surface); }
+    .person-name { font-size: 24px; font-weight: 400; }
+    .person-dept { font-size: 14px; color: var(--text-secondary); }
+
+    /* Google-style Filter Pills */
+    .filters { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 12px; margin-bottom: 12px; scrollbar-width: none; }
+    .filters::-webkit-scrollbar { display: none; }
+    .pill {
+      padding: 6px 14px; border-radius: 16px; border: 1px solid var(--border);
+      background: var(--bg); color: var(--text-primary); font-size: 14px;
+      cursor: pointer; white-space: nowrap; transition: background 0.15s;
+    }
+    .pill:hover { background: var(--surface); }
+    .pill.active {
+      background: var(--pill-active-bg); color: var(--pill-active-text);
+      border-color: var(--pill-active-border); font-weight: 500;
+    }
+
+    /* Carousel Wrapper & Scroll Buttons */
+    .carousel-wrapper { position: relative; }
+    .carousel {
+      display: flex; gap: 12px; overflow-x: auto; scroll-behavior: smooth;
+      padding: 4px 2px 16px 2px; scrollbar-width: none;
+    }
+    .carousel::-webkit-scrollbar { display: none; }
+    .nav-btn {
+      position: absolute; top: 105px; width: 36px; height: 36px; border-radius: 50%;
+      background: white; border: 1px solid var(--border); box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      font-size: 18px; color: var(--text-secondary); z-index: 10;
+    }
+    .nav-btn:hover { color: var(--text-primary); background: var(--surface); }
+    .nav-prev { left: -18px; }
+    .nav-next { right: -18px; }
+
+    /* Movie Cards */
+    .card {
+      flex: 0 0 144px; border: 1px solid var(--border); border-radius: 8px;
+      overflow: hidden; background: var(--bg); transition: box-shadow 0.2s;
+      text-decoration: none; color: inherit; display: flex; flex-direction: column;
+    }
+    .card:hover { box-shadow: 0 2px 8px rgba(32,33,36,0.2); }
+    .poster {
+      width: 144px; height: 216px; object-fit: cover; background: #e8eaed;
+      display: flex; align-items: center; justify-content: center; color: #9aa0a6; font-size: 12px; text-align: center; padding: 8px;
+    }
+    .card-info { padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between; flex: 1; }
+    .movie-title {
+      font-size: 14px; line-height: 1.3; color: var(--text-primary);
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+      margin-bottom: 4px;
+    }
+    .movie-meta { font-size: 12px; color: var(--text-secondary); }
+    .status { color: var(--text-secondary); font-size: 14px; margin-top: 20px; }
+  </style>
+</head>
+<body>
+
+  <div class="search-bar">
+    <input type="text" id="searchInput" placeholder="Search actor or director (e.g. Greta Gerwig)..." />
+    <input type="password" id="apiKeyInput" placeholder="Paste TMDB v3 API Key" />
+    <button class="search-btn" onclick="handleSearch()">Search</button>
+  </div>
+
+  <div id="resultsArea" style="display: none;">
+    <div class="person-header" id="personHeader"></div>
+    <div class="filters" id="filterPills"></div>
+    <div class="carousel-wrapper">
+      <button class="nav-btn nav-prev" onclick="scrollCarousel(-600)">‹</button>
+      <div class="carousel" id="carousel"></div>
+      <button class="nav-btn nav-next" onclick="scrollCarousel(600)">›</button>
+    </div>
+  </div>
+  <div id="statusMsg" class="status">Enter a TMDB API key and search for someone to see their filmography.</div>
+
+  <script>
+    // Optional: Hardcode your key here if using a private repo, otherwise it saves to your browser's localStorage
+    const DEFAULT_API_KEY = ''; 
+    
+    const apiKeyInput = document.getElementById('apiKeyInput');
+    const searchInput = document.getElementById('searchInput');
+    apiKeyInput.value = localStorage.getItem('tmdb_api_key') || DEFAULT_API_KEY;
+
+    let allCredits = [];
+    let currentRole = 'All';
+
+    searchInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSearch(); });
+
+    async function handleSearch() {
+      const query = searchInput.value.trim();
+      const apiKey = apiKeyInput.value.trim();
+      if (!apiKey) return setStatus('Please enter your TMDB v3 API Key first.');
+      if (!query) return;
+
+      localStorage.setItem('tmdb_api_key', apiKey);
+      setStatus('Searching...');
+      document.getElementById('resultsArea').style.display = 'none';
+
+      try {
+        // 1. Find the person
+        const searchRes = await fetch(`https://themoviedb.org{apiKey}&query=${encodeURIComponent(query)}`);
+        const searchData = await searchRes.json();
+        if (!searchData.results || searchData.results.length === 0) {
+          return setStatus('No results found.');
+        }
+
+        const person = searchData.results[0];
+
+        // 2. Fetch combined movie & TV credits
+        const creditsRes = await fetch(`https://themoviedb.org{person.id}/combined_credits?api_key=${apiKey}`);
+        const creditsData = await creditsRes.json();
+
+        renderPersonHeader(person);
+        allCredits = processCredits(creditsData);
+        currentRole = 'All';
+        renderPills(allCredits);
+        renderCards();
+
+        setStatus('');
+        document.getElementById('resultsArea').style.display = 'block';
+      } catch (err) {
+        setStatus('Error fetching data. Double-check your API key.');
+        console.error(err);
+      }
+    }
+
+    function processCredits(data) {
+      const map = new Map();
+
+      // Helper to merge cast & crew roles for the same title
+      const addItem = (item, role) => {
+        // Filter out talk shows (10767) and news (10763) to reduce clutter
+        if (item.genre_ids && (item.genre_ids.includes(10767) || item.genre_ids.includes(10763))) return;
+
+        const key = `${item.media_type}_${item.id}`;
+        if (!map.has(key)) {
+          map.set(key, {
+            id: item.id,
+            media_type: item.media_type,
+            title: item.title || item.name,
+            date: item.release_date || item.first_air_date || '',
+            poster: item.poster_path,
+            popularity: item.vote_count || 0, // Sort by vote count for accurate "known for" ordering
+            roles: new Set()
+          });
+        }
+        map.get(key).roles.add(role);
+      };
+
+      (data.cast || []).forEach(item => addItem(item, 'Actor'));
+      (data.crew || []).forEach(item => {
+        if (['Director', 'Writer', 'Producer', 'Executive Producer'].includes(item.job)) {
+          addItem(item, item.job === 'Executive Producer' ? 'Producer' : item.job);
+        }
+      });
+
+      return Array.from(map.values()).sort((a, b) => b.popularity - a.popularity);
+    }
+
+    function renderPersonHeader(person) {
+      const img = person.profile_path 
+        ? `<img class="person-avatar" src="https://tmdb.org{person.profile_path}" alt="${person.name}">`
+        : `<div class="person-avatar"></div>`;
+      document.getElementById('personHeader').innerHTML = `
+        ${img}
+        <div>
+          <div class="person-name">${person.name}</div>
+          <div class="person-dept">${person.known_for_department || 'Filmography'}</div>
+        </div>
+      `;
+    }
+
+    function renderPills(credits) {
+      const roles = new Set(['All']);
+      credits.forEach(c => c.roles.forEach(r => roles.add(r)));
+
+      const container = document.getElementById('filterPills');
+      container.innerHTML = '';
+      roles.forEach(role => {
+        const btn = document.createElement('button');
+        btn.className = `pill ${role === currentRole ? 'active' : ''}`;
+        btn.textContent = role;
+        btn.onclick = () => {
+          currentRole = role;
+          renderPills(credits);
+          renderCards();
+        };
+        container.appendChild(btn);
+      });
+    }
+
+    function renderCards() {
+      const carousel = document.getElementById('carousel');
+      carousel.scrollLeft = 0;
+      const filtered = currentRole === 'All' 
+        ? allCredits 
+        : allCredits.filter(c => c.roles.has(currentRole));
+
+      carousel.innerHTML = filtered.map(item => {
+        const year = item.date ? item.date.substring(0, 4) : 'TBA';
+        const posterHtml = item.poster
+          ? `<img class="poster" src="https://tmdb.org{item.poster}" loading="lazy" alt="${item.title}">`
+          : `<div class="poster">${item.title}</div>`;
+        const link = `https://themoviedb.org{item.media_type}/${item.id}`;
+
+        return `
+          <a class="card" href="${link}" target="_blank" rel="noopener">
+            ${posterHtml}
+            <div class="card-info">
+              <div class="movie-title" title="${item.title}">${item.title}</div>
+              <div class="movie-meta">${year}</div>
+            </div>
+          </a>
+        `;
+      }).join('');
+    }
+
+    function scrollCarousel(amount) {
+      document.getElementById('carousel').scrollBy({ left: amount, behavior: 'smooth' });
+    }
+
+    function setStatus(msg) {
+      document.getElementById('statusMsg').textContent = msg;
+    }
+  </script>
+</body>
+</html>
